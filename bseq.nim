@@ -1,12 +1,3 @@
-#
-#
-#            Nim's Runtime Library
-#        (c) Copyright 2022 Andreas Rumpf
-#
-#    See the file "copying.txt", included in this
-#    distribution, for details about the copyright.
-#
-
 ## An implementation of a dynamic array of Bytes in Nim
 ## The underlying implementation uses a `seq`.
 
@@ -26,6 +17,7 @@ import strutils
 import algorithm
 
 type
+  INT16TO64 = int | int16 | int32 | int64 | uint | uint16 | uint32 | uint64
   BSeq* = object of RootObj
     data: seq[byte]
 
@@ -34,12 +26,9 @@ proc initBSeq*(initialSize = 0, initialValue: byte = 0): BSeq =
   ##
   ## If `initialValue` is not defined,
   ## the BSeq is filled with 0s
-  var sq = newSeq[byte](initialSize)
-
   if initialValue != 0:
-    for i in 0..(initialSize - 1) :
-      sq[i] = initialValue
-  result.data = sq
+    for val in mitems result.data:
+      val = initialValue
 
 proc len*(bs: BSeq):int =
   ## Returns the number of items in `bs`
@@ -94,19 +83,26 @@ proc contains*(bs: BSeq, item: byte): bool =
 # several data types into a common `seq[byte]` representation
 # Which will serve in other functions
 
-proc digest(data: char): seq[byte] =
-  return @[data.byte]
-
 proc digest(data: string): seq[byte] =
   return cast[seq[byte]](data)
 
 proc digest(data: SomeInteger): seq[byte] =
-  var temp = data
+  var
+    temp = data
+    tempArr = newSeq[byte](sizeof data)
+    i = 0
   while temp > 0:
-    result.insert uint8(temp mod 256), 0
+    tempArr[i] = uint8(temp mod 256)
     temp = (temp shr 8)
+    i += 1
+  result = newSeq[byte](i)
+  for j in 0..(i-1):
+    result[^(j+1)] = tempArr[j]
 
-proc addFirst*[T](bs: var BSeq, bs2: BSeq) =
+## Caution : `addFirst` must be avoided in
+## perfomance-critical programs.
+ 
+proc addFirst*(bs: var BSeq, bs2: BSeq) =
   ## Prepends another Byte sequence to `bs`
   bs.data = bs2.data & bs.data
 
@@ -114,7 +110,7 @@ proc addFirst*(bs: var BSeq, data: byte | uint8 | int8 | char) =
   ## Prepends a byte to `bs`
   bs.data.insert data.byte, 0
 
-proc addFirst*(bs: var BSeq, data: SomeInteger | string) =
+proc addFirst*(bs: var BSeq, data: INT16TO64 | string) =
   ## Prepends an integer, a string, or a char to `bs`
   bs.data = digest(data) & bs.data
 
@@ -130,13 +126,16 @@ proc addLast*(bs: var BSeq, data: byte | uint8 | int8 | char) =
   ## Appends a byte to `bs`
   bs.data.insert data.byte, bs.data.len
 
-proc addLast*(bs: var BSeq, data: SomeInteger | string) =
+proc addLast*(bs: var BSeq, data: INT16TO64 | string) =
   ## Appends an integer, a string, or a char to `bs`
   bs.data &= digest data
 
 proc addLast*(bs: var BSeq, arr: openArray[uint8]) =
   ## Appends an openArray of bytes to `bs`
   bs.data &= @arr
+
+## Do never forget that `insert(x, i)` and `delete(i)` are poorly
+## performant algorithms, because they shifts all the items after `i`
 
 proc insert*(bs: var BSeq, b: byte, index: Natural) =
   ## Inserts a byte at the `index`-th position, in `bs`
@@ -146,13 +145,21 @@ proc delete*(bs: var BSeq, index: Natural) =
   ## Deletes the `index`-th byte of `bs`
   bs.data.delete index
 
-proc toBSeq*(data: SomeInteger | string | char): BSeq =
-  ## Converts an integer, a string or a char, into a Byte Sequence
+proc toBSeq*(data: byte | uint8 | int8 | char): BSeq =
+  ## Converts a byte into a Byte Sequence
+  result.data = @[data.byte]
+
+proc toBSeq*(data: INT16TO64 | string): BSeq =
+  ## Converts an integer, or a string into a Byte Sequence
   result.data = digest data
 
 proc toBSeq*(arr: openArray[uint8]): BSeq =
   ## Converts an openArray of bytes into a Byte Sequence
   result.data = @arr
+
+proc asBSeq*(arr: var seq[byte]): BSeq =
+  ## Converts an openArray of bytes into a Byte Sequence
+  result.data = arr
 
 template `@:`*(val: typed):BSeq = toBSeq(val)
   ## An operator that serves as shortcut to Build Byte Sequences
@@ -204,7 +211,7 @@ proc `xor`*(bs1: BSeq, bs2: BSeq): BSeq =
     bs:BSeq
     toup = 1
 
-  if bs1.len >=  bs2.len:
+  if bs1.len >  bs2.len:
     bs = bs1
   else:
     bs = bs2
@@ -216,6 +223,10 @@ proc `xor`*(bs1: BSeq, bs2: BSeq): BSeq =
       arr.insert bs[bs.data.len - toup], 0
     toup += 1
   return @:arr
+
+proc `not`*(bs: BSeq): BSeq =
+  for val in bs.data:
+    result.data.add not val
 
 ## Here is the difference between the preceding bitwise operators
 ## and their loop versions:
@@ -396,3 +407,4 @@ proc `$`*(bs: BSeq): string =
       break
 
   result &= ">"
+
